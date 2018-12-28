@@ -1,14 +1,13 @@
-import torch
 import torch.nn as nn
 from torch.nn.modules.loss import MSELoss
 from torch.optim import Adam
 from torch.utils.data.dataloader import DataLoader
-from torch.utils.data.sampler import Sampler
 from torchvision.datasets import MNIST
 import torchvision.transforms as transforms
+
+from data import MNISTZeroSampler, MNISTNonZeroSampler, compute_covar
 from storm.vis import UniImageViewer
 import statistics
-from tqdm import tqdm
 
 if __name__ == '__main__':
     in_features = 28 * 28
@@ -21,105 +20,12 @@ if __name__ == '__main__':
     dist_net = nn.Sequential(nn.Linear(in_features, h_size), nn.BatchNorm1d(h_size), nn.ReLU(), nn.Linear(h_size, 1),
                              nn.ReLU())
 
-
-    class MNISTZeroSampler(Sampler):
-        """
-        Samples only zeros from MNIST
-        """
-
-        def __init__(self, datasource):
-            super().__init__(datasource)
-            self.datasource = datasource
-            self.zero_elems = []
-            len_datasource_tq = tqdm(range(len(self.datasource)))
-            len_datasource_tq.set_description('building index of zeroes')
-            for index in len_datasource_tq:
-                image, label = self.datasource[index]
-                if label.item() == 0:
-                    self.zero_elems.append(index)
-
-        def __iter__(self):
-            return iter(self.zero_elems)
-
-        def __len__(self):
-            return len(self.zero_elems)
-
-
-    class MNISTNonZeroSampler(Sampler):
-        """
-        Samples everything but zeros from MNIST
-        """
-
-        def __init__(self, datasource):
-            super().__init__(datasource)
-            self.datasource = datasource
-            self.zero_elems = []
-            len_datasource_tq = tqdm(range(len(self.datasource)))
-            len_datasource_tq.set_description('building index of non zeroes')
-            for index in len_datasource_tq:
-                image, label = self.datasource[index]
-                if label.item() != 0:
-                    self.zero_elems.append(index)
-
-        def __iter__(self):
-            return iter(self.zero_elems)
-
-        def __len__(self):
-            return len(self.zero_elems)
-
-
     mnist = MNIST('mnistdata', download=True,
                   transform=transforms.Compose([
                       transforms.ToTensor()
                   ]))
 
-    mnist_normal = DataLoader(mnist, batch_size=batch_size)
-
-
-    def compute_covar():
-        sum_image = torch.zeros(in_features).double()
-        sum_squares_dev = torch.zeros(in_features).double()
-        mnist_normal_tq = tqdm(mnist_normal)
-        mnist_normal_tq.set_description('computing covariance matrix - mean')
-        for images, labels in mnist_normal_tq:
-            flat_images = images.squeeze().view(-1, in_features).double()
-            sum_image = sum_image + torch.sum(flat_images, dim=0)
-
-        mean = sum_image / len(mnist)
-
-        mnist_normal_tq = tqdm(mnist_normal)
-        mnist_normal_tq.set_description('computing covariance matrix - stdev')
-        for images, labels in mnist_normal_tq:
-            flat_images = images.squeeze().view(-1, in_features).double()
-            flat_images_dev = flat_images - mean
-            sum_squares_dev = sum_squares_dev + torch.sum(flat_images_dev ** 2, dim=0)
-
-        stdev = torch.sqrt((sum_squares_dev / (len(mnist) - 1)))
-        stdev[stdev == 0.0] = 1e-12
-        return mean, stdev
-
-
-    mean, stdev = compute_covar()
-    mean = mean.view(-1, 28, 28).float()
-    stdev = stdev.view(-1, 28, 28).float()
-
-
-    class Whiten(object):
-        def __init__(self, mean, stdev):
-            self.mean = mean
-            self.stdev = stdev
-
-        def __call__(self, x):
-            return (x - self.mean) / self.stdev
-
-
-    class Clip(object):
-        def __init__(self, clip):
-            self.clip = clip
-
-        def __call__(self, x):
-            return x.clamp(self.clip)
-
+    mean, stdev = compute_covar(mnist, index=0, batch_size=200)
 
     mnist_white = MNIST('mnistdata', download=True,
                         transform=transforms.Compose([
