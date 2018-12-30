@@ -15,16 +15,20 @@ from data import compute_covar
 if __name__ == '__main__':
     in_features = 28 * 28
     h_size = 50
-    epochs = 30
+    epochs = 40
     batch_size = 1000
     novel_batch_size = 200
     sample = False
     magnitude_norm = False
     L1_distance = True
 
+    #todo run test with a very very small learning rate
+
     class MNISTBiasedSampler(Sampler):
         """
-        Samples only zeros from MNIST
+        Samples unevenly from MNIST
+        1, 2, and 3 are reduced in frequency
+        the idea is this will make them more "novel"
         """
 
         def __init__(self, datasource, index, drop_freq):
@@ -63,8 +67,9 @@ if __name__ == '__main__':
     mnist = DataLoader(mnist, batch_size=batch_size)
 
     for run in range(10):
-        tb = SummaryWriter(f'runs/{run:2d}/')
+        tb = SummaryWriter(f'runs/normal_init/{run:2d}/')
 
+        # a simple network
         rand_net = nn.Sequential(nn.Linear(in_features, h_size),
                                  nn.BatchNorm1d(h_size),
                                  nn.ReLU(),
@@ -73,6 +78,14 @@ if __name__ == '__main__':
                                  nn.ReLU(),
                                  nn.Linear(h_size, 1),
                                  nn.ReLU())
+
+        # initialization function, first checks the module type
+        def init_normal(m):
+            if type(m) == nn.Linear:
+                nn.init.uniform_(m.weight)
+
+        # use the modules apply function to recursively apply the initialization
+        rand_net.apply(init_normal)
 
         dist_net = nn.Sequential(nn.Linear(in_features, h_size),
                                  nn.BatchNorm1d(h_size),
@@ -92,6 +105,10 @@ if __name__ == '__main__':
         novelty_counts = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
         novelty_freq = None
         global_step = 0
+
+        def init_normal(m):
+            if type(m) == nn.Linear:
+                nn.init.uniform_(m.weight)
 
         for epoch in range(epochs):
             train_losses = []
@@ -139,7 +156,7 @@ if __name__ == '__main__':
                 novelty_freq = [x / novelty_total for x in novelty_counts]
 
                 freq_diff = [base - novelty for base, novelty in zip(base_freq, novelty_freq)]
-                print(freq_diff, loss.item())
+                #print(freq_diff, loss.item())
 
                 for i, freq in enumerate(freq_diff):
                     tb.add_scalar(f'freq_diff_{i}', freq, global_step)
